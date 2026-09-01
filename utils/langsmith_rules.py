@@ -30,23 +30,92 @@ def get_or_create_annotation_queue(
     client: Client,
     name: str,
     description: str = "",
+    *,
+    rubric_instructions: Optional[str] = None,
+    rubric_items: Optional[list] = None,
 ):
-    """Return an existing annotation queue by name, or create one."""
+    """Return an existing annotation queue by name, or create one.
+
+    A bare queue has no reviewer guidance and nothing to fill in. Pass:
+
+    - ``rubric_instructions``: guidance shown at the top of the queue.
+    - ``rubric_items``: the feedback keys reviewers score, each a dict with at
+      least ``feedback_key`` (see ``AnnotationQueueRubricItem``). Any referenced
+      feedback key that lacks a workspace feedback config is created as a 0-1
+      continuous score so the reviewer form is well-defined.
+
+    If the queue already exists, its rubric is updated in place so re-running the
+    cell keeps the instructions and feedback items in sync.
+    """
+    if rubric_items:
+        _ensure_feedback_configs(client, rubric_items)
+
     existing = list(client.list_annotation_queues(name=name))
     if existing:
-        return existing[0]
-    return client.create_annotation_queue(name=name, description=description)
+        queue = existing[0]
+        if rubric_instructions is not None or rubric_items is not None:
+            client.update_annotation_queue(
+                queue.id,
+                rubric_instructions=rubric_instructions,
+                rubric_items=rubric_items,
+            )
+        return queue
+
+    return client.create_annotation_queue(
+        name=name,
+        description=description,
+        rubric_instructions=rubric_instructions,
+        rubric_items=rubric_items,
+    )
+
+
+def _ensure_feedback_configs(client: Client, rubric_items: list) -> None:
+    """Create a default 0-1 continuous feedback config for any rubric key missing one.
+
+    A rubric item links a queue to a *feedback key*; the key's type/range comes
+    from its workspace feedback config. If a key has no config yet, the reviewer
+    form is underspecified, so we create a simple 0 (fail) - 1 (pass) score.
+    """
+    for item in rubric_items:
+        key = item.get("feedback_key") if isinstance(item, dict) else None
+        if not key:
+            continue
+        try:
+            client.create_feedback_config(
+                feedback_key=key,
+                feedback_config={"type": "continuous", "min": 0, "max": 1},
+            )
+        except Exception:
+            # Already exists (409) or otherwise present -- leave the existing config.
+            pass
 
 
 # --------------------------------------------------------------------------- #
 # Run rules
 # --------------------------------------------------------------------------- #
 
+def _raise_with_body(response: requests.Response) -> None:
+    """Like `raise_for_status()`, but include the server's response body.
+
+    The LangSmith API returns the actual reason for a 4xx (e.g. an invalid
+    evaluator config or unknown secret name) in the response body. The bare
+    `raise_for_status()` hides it, leaving only a generic status line, so we
+    attach the body to the error message.
+    """
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        body = (response.text or "").strip()
+        raise requests.HTTPError(
+            f"{exc} — response body: {body[:1000]}", response=response
+        ) from exc
+
+
 def _llm_judge_evaluator(
     prompt: Union[str, Sequence[tuple[str, str]]],
     output_schema: dict,
     *,
-    model_name: str = "gpt-5.6-luna",
+    model_name: str = "gpt-5.6-terra",
     temperature: float = 0,
     input_var: str = "input",
     output_var: str = "output",
@@ -72,14 +141,15 @@ def _llm_judge_evaluator(
     # sees your .env. Its credentials come from a secret stored in LangSmith →
     # Workspace settings → Secrets, referenced here by name only.
     #
-    # Which secret depends on how .env is set up: LC_GATEWAY_KEY present means this
-    # machine talks to models through the LangSmith Gateway, so point the judge there
-    # too. Otherwise call OpenAI directly. We only check whether the variable is set —
-    # its value stays local and is never sent.
+    # Which secret depends on how .env is set up: LANGSMITH_API_KEY_GATEWAY present
+    # means this machine talks to models through the LangSmith Gateway, so point the
+    # judge there too (the gateway-only model names like `gpt-5.6-luna` require it).
+    # Otherwise call OpenAI directly. We only check whether the variable is set —
+    # its value stays local and is never sent; the string below is a secret *name*.
     model_kwargs = {"model": model_name, "temperature": temperature}
-    if os.environ.get("LC_GATEWAY_KEY"):
+    if os.environ.get("LANGSMITH_API_KEY_GATEWAY"):
         model_kwargs["base_url"] = "https://gateway.smith.langchain.com/openai"
-        model_kwargs["api_key"] = {"lc": 1, "type": "secret", "id": ["LC_GATEWAY_KEY"]}
+        model_kwargs["api_key"] = {"lc": 1, "type": "secret", "id": ["LANGSMITH_API_KEY_GATEWAY"]}
     else:
         model_kwargs["api_key"] = {"lc": 1, "type": "secret", "id": ["OPENAI_API_KEY"]}
 
@@ -118,6 +188,7 @@ def create_run_rule(
     raw `payload` LangSmith stored. Either `llm_judge_prompt` (+schema), or
     `add_to_annotation_queue_id`, or both, should be provided.
     """
+    print("Creating run rule")
     project = client.read_project(project_name=project_name)
 
     evaluators = []
@@ -155,7 +226,7 @@ def create_run_rule(
         headers={"x-api-key": client.api_key, "accept": "application/json"},
         timeout=30,
     )
-    list_response.raise_for_status()
+    _raise_with_body(list_response)
     for existing in list_response.json():
         if existing.get("display_name") == display_name:
             requests.delete(
@@ -167,7 +238,7 @@ def create_run_rule(
     response = requests.post(
         f"{client.api_url}/runs/rules", json=body, headers=headers, timeout=30,
     )
-    response.raise_for_status()
+    _raise_with_body(response)
     payload = response.json()
 
     tenant_id = payload["tenant_id"]

@@ -1,3 +1,5 @@
 [agent]
+# NOTE: kept as "modular-workshops-deep-agent" — Module 5 (Engine) hardcodes
+# this as the deployment/project name. Rename in both places together.
 name = "modular-workshops-deep-agent"
 model = "openai:gpt-5.6-terra"

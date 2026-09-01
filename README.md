@@ -1,6 +1,6 @@
-# Modular Workshops
+# Crew & Catering Agent Workshop
 
-This repository contains hands-on tutorials for learning LangChain, LangGraph, and Deep Agents.
+This repository contains hands-on tutorials for learning LangChain, LangGraph, and Deep Agents, built around a **crew & catering operations agent** for an airline — crew scheduling and duty-time/rest compliance, in-flight catering and special-meal planning, and crew recovery during disruptions.
 
 This is a condensed version of LangChain Academy, intended to be run in a session with a LangChain engineer. If you're interested in going into more depth, or working through tutorials on your own, check out [LangChain Academy](https://academy.langchain.com/courses/intro-to-langgraph)! LangChain Academy has helpful pre-recorded videos from our LangChain engineers.
 
@@ -22,10 +22,10 @@ cp .env.example .env
 
 | Key | Required for | Get one |
 |-----|--------------|---------|
-| `OPENAI_API_KEY` | Modules 1-4 (default model) | <https://platform.openai.com> |
-| `LANGSMITH_API_KEY` | Modules 3 & 4 (recommended for all) | <https://smith.langchain.com> |
-| `LANGSMITH_API_KEY_GATEWAY` / `WORKSPACE_ID` | Module 3 §1 (LangSmith Gateway policies) | same key as `LANGSMITH_API_KEY`; workspace ID from LangSmith Settings → Workspace |
-| `TAVILY_API_KEY` | Modules 1 & 3 (web search tool) | <https://tavily.com> |
+| `OPENAI_API_KEY` | Modules 4 & 5 (default model) | <https://platform.openai.com> |
+| `LANGSMITH_API_KEY` | Modules 4 & 5 (recommended for all) | <https://smith.langchain.com> |
+| `LANGSMITH_API_KEY_GATEWAY` / `WORKSPACE_ID` | LangSmith Gateway policies | same key as `LANGSMITH_API_KEY`; workspace ID from LangSmith Settings → Workspace |
+| `TAVILY_API_KEY` | `policy_lookup` web-search tool | <https://tavily.com> |
 
 ```bash
 # 3. Start Jupyter
@@ -58,19 +58,9 @@ model = init_chat_model("openai:gpt-5.6-terra", use_responses_api=True)
 
 `utils/models.py` also ships a commented-out **LangSmith Gateway** block. Module 3 §1.4 walks through flipping the default to it so every model call (notebooks *and* the deployed agent) is routed through the gateway and subject to workspace policies.
 
-## Deploy + Govern (Module 3)
+## Engine (Module 2)
 
-Module 3 first creates a workspace-level **LangSmith Gateway** policy (PII / secrets redaction), routes the model through the gateway, then deploys the agent at `agents/deep_agent/` to LangSmith via the `langgraph` CLI (installed by `uv sync`). The deploy config is `langgraph.json` at the workshop root.
-
-Because `agents/deep_agent/agent.py` imports `model` from `utils.models`, whichever block is active in `utils/models.py` at deploy time is what ships — flip on the gateway block and the deployed agent inherits it with no extra flags.
-
-Your `LANGSMITH_API_KEY` must have deployment permissions (use a `lsv2_sk_...` service key). The gateway block reads `LANGSMITH_API_KEY_GATEWAY` (the same key under a non-reserved name, since `langgraph deploy` strips `LANGSMITH_API_KEY` during upload).
-
-## Engine (Module 5)
-
-Module 5 introduces **LangSmith Engine** — it reads your deployed agent's production traces, clusters recurring failures into issues, diagnoses the root cause against your connected source code, and proposes fixes as GitHub PRs. It runs on the Module 3 deployment, driven through an *assistant* (a saved graph configuration) that swaps in a deliberately broken search tool so Engine has a clear, reproducible issue to find.
-
-Engine's first analysis takes ~20 minutes, so it's best primed before a session. Needs the Module 3 deployment and a `LANGSMITH_API_KEY`.
+Module 2 introduces **LangSmith Engine** — it reads your deployed agent's production traces, clusters recurring failures into issues, diagnoses the root cause against your connected source code, and proposes fixes as GitHub PRs. It runs on the Module 3 deployment, driven through an *assistant* (a saved graph configuration) that swaps in a deliberately broken search tool so Engine has a clear, reproducible issue to find.
 
 ## Project Structure
 
@@ -82,19 +72,17 @@ modular-workshops/
 ├── langgraph.json                  (registers agents/deep_agent for langgraph dev)
 ├── utils/
 ├── agents/
-│   ├── research_agent.py           (shared agent factory — Module 1 references, Module 4 imports for eval)
-│   └── deep_agent/                 (deployable + governed agent for Module 3)
+│   ├── research_agent.py           (shared crew & catering agent factory — Module 4 imports for eval)
+│   └── deep_agent/                 (deployable + governed crew & catering agent for Module 3)
 │       ├── agent.py
 │       ├── AGENTS.md
 │       └── skills/
-│           ├── linkedin-post/SKILL.md
-│           └── twitter-post/SKILL.md
+│           ├── crew-briefing/SKILL.md
+│           └── catering-summary/SKILL.md
 ├── images/                         (diagrams used by the notebooks)
 └── modules/
-    ├── 01_deep_agents.ipynb        (Module 1)
-    ├── 02_langgraph.ipynb          (Module 2)
-    ├── 03_deploy_and_govern.ipynb  (Module 3)
-    └── 04_langsmith.ipynb          (Module 4)
+    ├── 01_langsmith.ipynb          (Module 4 — introduces the crew & catering agent, then tracing + evals)
+    └── 02_engine.ipynb             (Module 5)
 ```
 
 ## Common Issues

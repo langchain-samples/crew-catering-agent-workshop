@@ -51,3 +51,7 @@ Thumbs.db
 # Deep Agents SQLite long-term memory (notebook demo artifact)
 deep_agents_memory.db
 deep_agents_memory.db-*
+
+# Agent-generated runtime output (written by the agent at run time, not source)
+agents/deep_agent/final_briefing.md
+agents/deep_agent/memories/
